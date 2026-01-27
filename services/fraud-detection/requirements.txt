@@ -1,0 +1,25 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-dotenv==1.0.0
+redis==5.0.1
+httpx==0.26.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Face Detection & Recognition
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.9
+numpy==1.26.3
+Pillow==10.2.0
+facenet-pytorch==2.5.3
+
+# Audio Analysis (for background voice detection)
+librosa==0.10.1
+scipy==1.12.0
+
+# ML
+torch==2.1.2
+
+# Utilities
+python-multipart==0.0.6
+aiofiles==23.2.1
