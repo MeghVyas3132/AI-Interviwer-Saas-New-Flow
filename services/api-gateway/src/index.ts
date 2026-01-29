@@ -17,6 +17,7 @@ import roundsRouter from './routes/rounds';
 import insightsRouter from './routes/insights';
 import verdictsRouter from './routes/verdicts';
 import resumesRouter from './routes/resumes';
+import authRouter from './routes/auth';
 
 // Create Express app
 const app: Application = express();
@@ -40,6 +41,8 @@ const io = new SocketIOServer(httpServer, {
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: false, // Disable for API
+  crossOriginEmbedderPolicy: false, // Allow embedding in iframes
+  frameguard: false, // Disable X-Frame-Options to allow resume PDF in iframe
 }));
 
 // CORS
@@ -139,6 +142,7 @@ app.get('/live', (req: Request, res: Response) => {
 // API Routes
 // =============================================================================
 
+app.use('/api/auth', authRouter);
 app.use('/api/rounds', roundsRouter);
 app.use('/api/insights', insightsRouter);
 app.use('/api/verdicts', verdictsRouter);

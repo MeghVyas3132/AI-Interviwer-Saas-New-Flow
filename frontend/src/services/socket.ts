@@ -176,6 +176,13 @@ export const onInsightAggregated = (handler: InsightHandler) => {
   return () => socket?.off('insight:aggregated', handler);
 };
 
+// Listen for individual insights (dev mode and real-time)
+export const onInsight = (handler: AlertHandler) => {
+  if (!socket) return () => {};
+  socket.on('insight', handler);
+  return () => socket?.off('insight', handler);
+};
+
 export const onInsightAlert = (handler: AlertHandler) => {
   if (!socket) return () => {};
   socket.on('insight:alert', handler);
@@ -233,4 +240,76 @@ export const emitInterviewStart = (roundId: string) => {
 
 export const emitInterviewEnd = (roundId: string) => {
   socket?.emit('interview:end', { roundId });
+};
+
+// ============== WebRTC Signaling ==============
+// These functions enable peer-to-peer video between candidate and interviewer
+
+export const sendWebRTCOffer = (roundId: string, offer: RTCSessionDescriptionInit) => {
+  if (!socket?.connected) return;
+  socket.emit('webrtc:offer', { roundId, offer });
+  console.log('[WebRTC] Sent offer');
+};
+
+export const sendWebRTCAnswer = (roundId: string, answer: RTCSessionDescriptionInit) => {
+  if (!socket?.connected) return;
+  socket.emit('webrtc:answer', { roundId, answer });
+  console.log('[WebRTC] Sent answer');
+};
+
+export const sendWebRTCIceCandidate = (roundId: string, candidate: RTCIceCandidate) => {
+  if (!socket?.connected) return;
+  socket.emit('webrtc:ice-candidate', { roundId, candidate: candidate.toJSON() });
+};
+
+export const sendWebRTCReady = (roundId: string) => {
+  if (!socket?.connected) return;
+  socket.emit('webrtc:ready', { roundId });
+  console.log('[WebRTC] Signaled ready');
+};
+
+export interface WebRTCOfferEvent {
+  offer: RTCSessionDescriptionInit;
+  fromUserId: string;
+  fromRole: string;
+}
+
+export interface WebRTCAnswerEvent {
+  answer: RTCSessionDescriptionInit;
+  fromUserId: string;
+  fromRole: string;
+}
+
+export interface WebRTCIceCandidateEvent {
+  candidate: RTCIceCandidateInit;
+  fromUserId: string;
+}
+
+export interface WebRTCPeerReadyEvent {
+  userId: string;
+  role: string;
+}
+
+export const onWebRTCOffer = (handler: (data: WebRTCOfferEvent) => void) => {
+  if (!socket) return () => {};
+  socket.on('webrtc:offer', handler);
+  return () => socket?.off('webrtc:offer', handler);
+};
+
+export const onWebRTCAnswer = (handler: (data: WebRTCAnswerEvent) => void) => {
+  if (!socket) return () => {};
+  socket.on('webrtc:answer', handler);
+  return () => socket?.off('webrtc:answer', handler);
+};
+
+export const onWebRTCIceCandidate = (handler: (data: WebRTCIceCandidateEvent) => void) => {
+  if (!socket) return () => {};
+  socket.on('webrtc:ice-candidate', handler);
+  return () => socket?.off('webrtc:ice-candidate', handler);
+};
+
+export const onWebRTCPeerReady = (handler: (data: WebRTCPeerReadyEvent) => void) => {
+  if (!socket) return () => {};
+  socket.on('webrtc:peer-ready', handler);
+  return () => socket?.off('webrtc:peer-ready', handler);
 };

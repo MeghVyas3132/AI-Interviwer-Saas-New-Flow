@@ -1,8 +1,8 @@
 // API Service - Axios-based HTTP client for backend communication
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-// API Base URL - connects to API Gateway
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+// API Base URL - connects to API Gateway (no /v1 suffix - matches backend routes)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
@@ -42,6 +42,12 @@ api.interceptors.response.use(
 
 // ============== Auth API ==============
 export const authApi = {
+  // Dev login for testing
+  devLogin: async (email: string, role: string) => {
+    const response = await api.post('/auth/dev-login', { email, role });
+    return response.data;
+  },
+  
   login: async (email: string, password: string) => {
     const response = await api.post('/auth/login', { email, password });
     return response.data;
@@ -68,12 +74,37 @@ export const authApi = {
 
 // ============== Interview Rounds API ==============
 export interface CreateRoundPayload {
-  interview_id: string;
+  externalInterviewId: string;
+  externalCandidateId: string;
+  externalInterviewerId?: string;
+  externalJobRoleId: string;
+  roundNumber?: number;
+  roundType: 'TECHNICAL_AI' | 'SCREENING_HUMAN' | 'HR_HUMAN' | 'MANAGERIAL_HUMAN' | 'CULTURAL_FIT_HUMAN';
+  interviewMode: 'AI_CONDUCTED' | 'HUMAN_AI_ASSISTED' | 'HUMAN_ONLY';
+  scheduledAt?: string;
+  scheduledDurationMinutes?: number;
+}
+
+export interface RoundResponse {
+  id: string;
+  external_interview_id: string;
+  external_candidate_id: string;
+  external_interviewer_id: string | null;
+  external_job_role_id: string;
   round_number: number;
-  round_type: 'technical' | 'behavioral' | 'hr' | 'culture_fit' | 'final';
-  scheduled_at: string;
-  interviewer_id: string;
-  candidate_id: string;
+  round_type: string;
+  interview_mode: string;
+  scheduled_at: string | null;
+  scheduled_duration_minutes: number;
+  started_at: string | null;
+  ended_at: string | null;
+  videosdk_meeting_id: string | null;
+  videosdk_token: string | null;
+  status: string;
+  candidate_consent_given: boolean;
+  candidate_consent_timestamp: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateRoomResponse {
@@ -113,7 +144,19 @@ export const roundsApi = {
     const response = await api.patch(`/rounds/${id}/end`);
     return response.data;
   },
-  
+
+  // Delete a round
+  delete: async (id: string) => {
+    const response = await api.delete(`/rounds/${id}`);
+    return response.data;
+  },
+
+  // Update a round
+  update: async (id: string, payload: Partial<CreateRoundPayload>) => {
+    const response = await api.put(`/rounds/${id}`, payload);
+    return response.data;
+  },
+
   // Create VideoSDK room for interview
   createRoom: async (id: string): Promise<CreateRoomResponse> => {
     const response = await api.post(`/rounds/${id}/create-room`);

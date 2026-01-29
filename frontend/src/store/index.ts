@@ -1,15 +1,24 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User, InterviewRound, AIMetrics, FraudAlert, TranscriptSegment, Recommendation, LiveInsight } from '@/types';
-import { mockUsers, mockAIMetrics, mockTranscript } from '@/lib/mock-data';
+
+// Default empty metrics
+const defaultMetrics: AIMetrics = {
+  speechConfidence: 0,
+  engagementScore: 0,
+  hesitationsCount: 0,
+  avgResponseTime: 0,
+  headMovement: 'stable',
+  videoQuality: 'good',
+  authenticity: 'verified',
+};
 
 // ============== Auth Store ==============
 interface AuthState {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
-  login: (role: 'hr' | 'employee' | 'candidate') => void;
-  loginWithToken: (user: User, token: string) => void;
+  login: (user: User, token: string) => void;
   logout: () => void;
   setToken: (token: string) => void;
 }
@@ -20,11 +29,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       token: null,
       isAuthenticated: false,
-      login: (role) => {
-        const user = mockUsers[role === 'employee' ? 'interviewer' : role];
-        set({ user, isAuthenticated: true });
-      },
-      loginWithToken: (user, token) => {
+      login: (user, token) => {
         localStorage.setItem('authToken', token);
         set({ user, token, isAuthenticated: true });
       },
@@ -100,9 +105,9 @@ interface AIMetricsState {
 }
 
 export const useAIMetricsStore = create<AIMetricsState>((set) => ({
-  metrics: mockAIMetrics,
+  metrics: defaultMetrics,
   fraudAlerts: [],
-  transcript: mockTranscript,
+  transcript: [],
   insights: [],
   recommendations: [],
   updateMetrics: (newMetrics) =>
@@ -120,7 +125,7 @@ export const useAIMetricsStore = create<AIMetricsState>((set) => ({
     set((state) => ({ fraudAlerts: state.fraudAlerts.filter((a) => a.id !== id) })),
   reset: () =>
     set({
-      metrics: mockAIMetrics,
+      metrics: defaultMetrics,
       fraudAlerts: [],
       transcript: [],
       insights: [],

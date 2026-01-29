@@ -44,17 +44,21 @@ export const createVideoSDKRoom = async (): Promise<VideoSDKRoom> => {
 
 /**
  * Generate VideoSDK JWT token
+ * Permissions should be array: ['allow_join'], ['allow_join', 'allow_mod']
  */
-export const generateVideoSDKToken = (permissions?: {
+export const generateVideoSDKToken = (options?: {
   allowJoin?: boolean;
   allowMod?: boolean;
 }): string => {
+  const perms = options || { allowJoin: true, allowMod: true };
+  const permissions: string[] = [];
+  
+  if (perms.allowJoin) permissions.push('allow_join');
+  if (perms.allowMod) permissions.push('allow_mod');
+  
   const payload = {
     apikey: config.videoSdk.apiKey,
-    permissions: permissions || {
-      allowJoin: true,
-      allowMod: true,
-    },
+    permissions,
   };
 
   const token = jwt.sign(payload, config.videoSdk.secret, {
@@ -67,27 +71,34 @@ export const generateVideoSDKToken = (permissions?: {
 
 /**
  * Generate token for a specific participant
+ * Uses standard API format that works with all VideoSDK features
  */
 export const generateParticipantToken = (
   meetingId: string,
   participantId: string,
   role: 'interviewer' | 'candidate'
 ): string => {
-  const permissions = {
-    allowJoin: true,
-    allowMod: role === 'interviewer', // Only interviewer can moderate
-  };
+  const permissions: string[] = ['allow_join'];
+  if (role === 'interviewer') {
+    permissions.push('allow_mod'); // Only interviewer can moderate
+  }
 
+  // Use simpler token format without version 2 for better compatibility
   const payload = {
     apikey: config.videoSdk.apiKey,
-    meetingId,
-    participantId,
     permissions,
   };
 
   const token = jwt.sign(payload, config.videoSdk.secret, {
     expiresIn: '4h', // Token valid for interview duration
     algorithm: 'HS256',
+  });
+
+  logger.info('Generated VideoSDK participant token', {
+    meetingId,
+    participantId,
+    role,
+    permissions,
   });
 
   return token;

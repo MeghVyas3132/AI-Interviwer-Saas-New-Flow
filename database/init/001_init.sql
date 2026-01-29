@@ -432,3 +432,30 @@ Expected JSON structure:
     ]
 }
 ';
+
+-- =============================================================================
+-- Resume File Uploads
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS candidate_resume_files (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    external_candidate_id VARCHAR(255) NOT NULL UNIQUE,
+    round_id UUID REFERENCES interview_rounds(id) ON DELETE SET NULL,
+    
+    -- File info
+    file_name VARCHAR(255) NOT NULL,
+    file_path TEXT NOT NULL,
+    file_url TEXT NOT NULL,
+    mime_type VARCHAR(100) DEFAULT 'application/pdf',
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_resume_files_candidate ON candidate_resume_files(external_candidate_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_resume_files_round ON candidate_resume_files(round_id);
+
+CREATE TRIGGER update_candidate_resume_files_updated_at
+    BEFORE UPDATE ON candidate_resume_files
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();

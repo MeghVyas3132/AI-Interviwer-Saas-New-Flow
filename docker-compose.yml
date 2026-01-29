@@ -250,6 +250,30 @@ services:
       - ai-interview-network
     restart: unless-stopped
 
+  # ===========================================================================
+  # Frontend (Next.js)
+  # ===========================================================================
+  
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-interview-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3000/api
+      - NEXT_PUBLIC_WS_URL=http://localhost:3000
+      - NEXT_PUBLIC_VIDEOSDK_TOKEN_ENDPOINT=/api/video/token
+      - NEXT_PUBLIC_ENABLE_INSIGHTS=true
+      - NEXT_PUBLIC_ENABLE_RECORDING=true
+      - NEXT_PUBLIC_USE_MOCK_DATA=false
+    ports:
+      - "5173:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - ai-interview-network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

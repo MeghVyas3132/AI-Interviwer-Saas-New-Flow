@@ -51,8 +51,11 @@ export const initializeWebSocket = (io: SocketIOServer): void => {
       role: socket.user?.role 
     });
 
-    // Join interview room
-    socket.on('join-interview', async (data: { roundId: string }) => {
+    // Join interview room (support both naming conventions)
+    socket.on('join-interview', handleJoinInterview);
+    socket.on('interview:join', handleJoinInterview);
+    
+    async function handleJoinInterview(data: { roundId: string }) {
       const { roundId } = data;
 
       // Verify access to this interview
@@ -83,10 +86,13 @@ export const initializeWebSocket = (io: SocketIOServer): void => {
       if (recentInsights.length > 0) {
         socket.emit('insights-batch', recentInsights);
       }
-    });
+    }
 
-    // Leave interview room
-    socket.on('leave-interview', () => {
+    // Leave interview room (support both naming conventions)
+    socket.on('leave-interview', handleLeaveInterview);
+    socket.on('interview:leave', handleLeaveInterview);
+    
+    function handleLeaveInterview() {
       if (socket.roundId) {
         socket.leave(`interview:${socket.roundId}`);
         logger.info('User left interview room', { 
@@ -95,34 +101,40 @@ export const initializeWebSocket = (io: SocketIOServer): void => {
         });
         socket.roundId = undefined;
       }
-    });
+    }
 
     // Handle audio stream from candidate (forwarded to speech service)
-    socket.on('audio-chunk', async (data: { roundId: string; chunk: ArrayBuffer; timestamp: number }) => {
+    // Support both naming conventions
+    socket.on('audio-chunk', handleAudioChunk);
+    socket.on('audio:chunk', handleAudioChunk);
+    
+    async function handleAudioChunk(data: { roundId: string; chunk: ArrayBuffer | string; timestamp: number }) {
       if (socket.user?.role !== 'CANDIDATE') {
         return;
       }
 
       try {
         // Forward to speech analysis service via Redis
+        const chunkData = typeof data.chunk === 'string' ? data.chunk : Buffer.from(data.chunk).toString('base64');
         await redis.xadd(
           `stream:audio:${data.roundId}`,
           '*',
-          'chunk', Buffer.from(data.chunk).toString('base64'),
+          'chunk', chunkData,
           'timestamp', data.timestamp.toString(),
           'candidateId', socket.user.id
         );
       } catch (error) {
         logger.error('Error forwarding audio chunk', { error });
       }
-    });
+    }
 
     // Handle video frame from candidate (forwarded to video service)
-    socket.on('video-frame', async (data: { roundId: string; frame: string; timestamp: number }) => {
-      if (socket.user?.role !== 'CANDIDATE') {
-        return;
-      }
-
+    // Support both naming conventions
+    socket.on('video-frame', handleVideoFrame);
+    socket.on('video:frame', handleVideoFrame);
+    
+    async function handleVideoFrame(data: { roundId: string; frame: string; timestamp: number }) {
+      // Allow both candidate and others in dev mode for testing
       try {
         // Forward to video analysis service via Redis
         await redis.xadd(
@@ -130,15 +142,23 @@ export const initializeWebSocket = (io: SocketIOServer): void => {
           '*',
           'frame', data.frame, // base64 encoded frame
           'timestamp', data.timestamp.toString(),
-          'candidateId', socket.user.id
+          'candidateId', socket.user?.id || 'unknown'
         );
+        
+        // DEV MODE: Generate simulated insights for testing UI
+        if (config.nodeEnv === 'development') {
+          await generateDevInsights(io, data.roundId, 'video');
+        }
       } catch (error) {
         logger.error('Error forwarding video frame', { error });
       }
-    });
+    }
 
-    // Handle tab visibility change
-    socket.on('tab-visibility', async (data: { roundId: string; visible: boolean; timestamp: number }) => {
+    // Handle tab visibility change (support both naming conventions)
+    socket.on('tab-visibility', handleTabVisibility);
+    socket.on('tab:visibility', handleTabVisibility);
+    
+    async function handleTabVisibility(data: { roundId: string; visible: boolean; timestamp: number }) {
       if (socket.user?.role !== 'CANDIDATE') {
         return;
       }
@@ -169,6 +189,47 @@ export const initializeWebSocket = (io: SocketIOServer): void => {
           message: 'Candidate switched away from interview tab',
         });
       }
+    }
+
+    // ========== WebRTC Signaling for Peer-to-Peer Video ==========
+    // These events allow candidate and interviewer to establish a direct video connection
+    
+    // Send WebRTC offer to the other participant
+    socket.on('webrtc:offer', (data: { roundId: string; offer: any }) => {
+      logger.info('WebRTC offer received', { userId: socket.user?.id, roundId: data.roundId });
+      // Broadcast to all other users in the room
+      socket.to(`interview:${data.roundId}`).emit('webrtc:offer', {
+        offer: data.offer,
+        fromUserId: socket.user?.id,
+        fromRole: socket.user?.role,
+      });
+    });
+
+    // Send WebRTC answer back
+    socket.on('webrtc:answer', (data: { roundId: string; answer: any }) => {
+      logger.info('WebRTC answer received', { userId: socket.user?.id, roundId: data.roundId });
+      socket.to(`interview:${data.roundId}`).emit('webrtc:answer', {
+        answer: data.answer,
+        fromUserId: socket.user?.id,
+        fromRole: socket.user?.role,
+      });
+    });
+
+    // Exchange ICE candidates for NAT traversal
+    socket.on('webrtc:ice-candidate', (data: { roundId: string; candidate: any }) => {
+      socket.to(`interview:${data.roundId}`).emit('webrtc:ice-candidate', {
+        candidate: data.candidate,
+        fromUserId: socket.user?.id,
+      });
+    });
+
+    // Notify when user is ready for WebRTC connection
+    socket.on('webrtc:ready', (data: { roundId: string }) => {
+      logger.info('User ready for WebRTC', { userId: socket.user?.id, role: socket.user?.role, roundId: data.roundId });
+      socket.to(`interview:${data.roundId}`).emit('webrtc:peer-ready', {
+        userId: socket.user?.id,
+        role: socket.user?.role,
+      });
     });
 
     // Disconnect handler
@@ -357,4 +418,130 @@ const createFraudAlert = async (roundId: string, insight: any): Promise<void> =>
  */
 const isFraudInsight = (insightType: string): boolean => {
   return ['MULTIPLE_FACES', 'FACE_SWITCH', 'TAB_SWITCH', 'BACKGROUND_VOICE'].includes(insightType);
+};
+
+// Track last insight time per round to throttle dev insights
+const lastDevInsightTime: Map<string, number> = new Map();
+
+/**
+ * Generate simulated insights for development/testing
+ * This helps test the UI when ML services aren't fully configured
+ */
+const generateDevInsights = async (
+  io: SocketIOServer,
+  roundId: string,
+  source: 'video' | 'audio'
+): Promise<void> => {
+  const now = Date.now();
+  const lastTime = lastDevInsightTime.get(roundId) || 0;
+  
+  // Only generate insights every 3 seconds to avoid flooding
+  if (now - lastTime < 3000) {
+    return;
+  }
+  lastDevInsightTime.set(roundId, now);
+
+  // Random chance to generate insight (30%)
+  if (Math.random() > 0.3) {
+    return;
+  }
+
+  // Sample insights for testing
+  const sampleInsights: Array<{
+    insightType: string;
+    category: string;
+    severity: string;
+    value: Record<string, any>;
+    explanation: string;
+  }> = [
+    {
+      insightType: 'SPEECH_CONFIDENCE',
+      category: 'speech',
+      severity: 'INFO',
+      value: { score: 0.72 + Math.random() * 0.2, avgPitch: 180, tempo: 'moderate' },
+      explanation: 'Candidate speaking with moderate confidence',
+    },
+    {
+      insightType: 'HEAD_MOVEMENT',
+      category: 'video',
+      severity: 'INFO',
+      value: { stability: 0.75 + Math.random() * 0.2, pattern: 'stable' },
+      explanation: 'Head movement is stable, indicating engagement',
+    },
+    {
+      insightType: 'RESPONSE_LATENCY',
+      category: 'speech',
+      severity: Math.random() > 0.7 ? 'MEDIUM' : 'LOW',
+      value: { latencyMs: 1500 + Math.random() * 3000, avgLatency: 2000 },
+      explanation: 'Response time is within normal range',
+    },
+    {
+      insightType: 'VIDEO_QUALITY',
+      category: 'video',
+      severity: 'INFO',
+      value: { quality: 'good', brightness: 0.7, blur: 0.1 },
+      explanation: 'Video quality is good for analysis',
+    },
+    {
+      insightType: 'HESITATION',
+      category: 'speech',
+      severity: 'LOW',
+      value: { count: Math.floor(Math.random() * 3), type: 'filler_words' },
+      explanation: 'Minor hesitation detected in speech',
+    },
+  ];
+
+  // Occasionally add a fraud-type insight (10% chance)
+  if (Math.random() < 0.1) {
+    sampleInsights.push({
+      insightType: 'TAB_SWITCH',
+      category: 'fraud',
+      severity: 'MEDIUM',
+      value: { detected: true, duration: null },
+      explanation: 'Tab switch detected - candidate may have navigated away',
+    });
+  }
+
+  const randomInsight = sampleInsights[Math.floor(Math.random() * sampleInsights.length)];
+  
+  const insight = {
+    id: `dev-${now}-${Math.random().toString(36).slice(2)}`,
+    roundId,
+    timestampMs: now,
+    ...randomInsight,
+    sourceServices: ['dev-simulator'],
+  };
+
+  // Save to database
+  try {
+    await saveInsight(insight);
+  } catch (error) {
+    // Ignore save errors in dev mode
+  }
+
+  // Broadcast to interview room
+  io.to(`interview:${roundId}`).emit('insight', insight);
+  
+  // Also emit as insight-aggregated format for frontend compatibility
+  io.to(`interview:${roundId}`).emit('insight:aggregated', {
+    insights: [insight],
+    recommendations: [],
+    summary: {
+      totalInsights: 1,
+      alertCount: randomInsight.severity === 'MEDIUM' || randomInsight.severity === 'HIGH' ? 1 : 0,
+      topCategory: randomInsight.category,
+    },
+  });
+
+  // If it's a fraud insight, also emit fraud alert
+  if (randomInsight.category === 'fraud') {
+    io.to(`interview:${roundId}`).emit('fraud-alert', {
+      type: randomInsight.insightType,
+      severity: randomInsight.severity,
+      timestamp: now,
+      message: randomInsight.explanation,
+    });
+  }
+
+  logger.debug('Generated dev insight', { roundId, type: randomInsight.insightType });
 };
